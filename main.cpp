@@ -7,6 +7,7 @@
 #include <experimental/random>
 #include <atomic>
 #include <ncurses.h>
+#include <condition_variable>
 
 void clear_line(WINDOW *win)
 {
@@ -17,7 +18,7 @@ void clear_line(WINDOW *win)
 }
 
 std::mutex writing_mutex;
-std::atomic<bool> cancellation_token(false);
+std::atomic<bool> cancellation_token{false};
 
 void draw_border(WINDOW *win, char type)
 {
@@ -45,45 +46,98 @@ struct Fork
 
 struct Philosopher
 {
-    Philosopher(int id, int left_fork_idx, int right_fork_idx, WINDOW *phil_window) : id(id), left_fork_idx(left_fork_idx),
-                                                                                      right_fork_idx(right_fork_idx), phil_window(phil_window) {}
+    Philosopher(int id, int left_fork_idx, int right_fork_idx, WINDOW *phil_window,
+                std::vector<Fork> &forks, std::vector<std::condition_variable> &cvs) : id(id), left_fork_idx(left_fork_idx),
+                                                                                       right_fork_idx(right_fork_idx), phil_window(phil_window),
+                                                                                       forks(forks), cvs(cvs) {}
     int id;
     int left_fork_idx;
     int right_fork_idx;
     WINDOW *phil_window;
+    std::vector<Fork> &forks;
+    std::vector<std::condition_variable> &cvs;
 
-    void eat_or_think(char symbol)
+    void get_forks()
+    {
+        std::unique_lock<std::mutex> lock_left_fork(forks[left_fork_idx].m);
+        while (forks[left_fork_idx].in_use)
+        {
+            cvs[left_fork_idx].wait(lock_left_fork);
+        }
+        forks[left_fork_idx].in_use = true;
+        fork_grabbed(left_fork_idx);
+        std::unique_lock<std::mutex> lock_right_fork(forks[right_fork_idx].m);
+        while (forks[right_fork_idx].in_use)
+        {
+            cvs[right_fork_idx].wait(lock_right_fork);
+        }
+        forks[right_fork_idx].in_use = true;
+        fork_grabbed(right_fork_idx);
+        eat();
+    }
+
+    void release_forks()
+    {
+        std::unique_lock<std::mutex> lock_right_fork(forks[right_fork_idx].m);
+        forks[right_fork_idx].in_use = false;
+        fork_released(right_fork_idx);
+        cvs[right_fork_idx].notify_all();
+        std::unique_lock<std::mutex> lock_left_fork(forks[left_fork_idx].m);
+        forks[left_fork_idx].in_use = false;
+        fork_released(left_fork_idx);
+        cvs[left_fork_idx].notify_all();
+    }
+
+    void fork_grabbed(int fork_idx)
+    {
+        {
+            std::lock_guard<std::mutex> writing_lock(writing_mutex);
+            mvwprintw(forks[fork_idx].fork_window, 2, 1, "FORK %2d STATE USED BY PHILOSOPHER %2d", fork_idx, this->id);
+            wrefresh(forks[fork_idx].fork_window);
+        }
+    }
+
+    void fork_released(int fork_idx)
+    {
+        {
+            std::lock_guard<std::mutex> writing_lock(writing_mutex);
+            mvwprintw(forks[fork_idx].fork_window, 2, 1, "FORK %2d STATE FREE BY PHILOSOPHER xx", fork_idx);
+            wrefresh(forks[fork_idx].fork_window);
+        }
+    }
+
+    void eat()
     {
         for (int i = 15; i >= 0; i--)
         {
             {
                 std::lock_guard<std::mutex> writing_lock(writing_mutex);
-                mvwprintw(this->phil_window, 2, 1, "PHILOSOPHER %2d STATE %c COUNTDOWN %2d", this->id, symbol, i);
+                mvwprintw(this->phil_window, 2, 1, "PHILOSOPHER %2d STATE E COUNTDOWN %2d", this->id, i);
                 wrefresh(this->phil_window);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(std::experimental::randint(400, 600)));
         }
     }
 
-    void feast(std::vector<Fork> &forks)
+    void think()
+    {
+        for (int i = 15; i >= 0; i--)
+        {
+            {
+                std::lock_guard<std::mutex> writing_lock(writing_mutex);
+                mvwprintw(this->phil_window, 2, 1, "PHILOSOPHER %2d STATE T COUNTDOWN %2d", this->id, i);
+                wrefresh(this->phil_window);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::experimental::randint(400, 600)));
+        }
+    }
+    void feast()
     {
         while (!cancellation_token)
         {
-            if (!forks[left_fork_idx].in_use && !forks[right_fork_idx].in_use)
-            {
-                std::lock(forks[left_fork_idx].m, forks[right_fork_idx].m);
-                std::lock_guard<std::mutex> left(forks[left_fork_idx].m, std::adopt_lock);
-                std::lock_guard<std::mutex> right(forks[right_fork_idx].m, std::adopt_lock);
-                forks[left_fork_idx].in_use = true;
-                forks[right_fork_idx].in_use = true;
-                eat_or_think('E');
-                forks[left_fork_idx].in_use = false;
-                forks[right_fork_idx].in_use = false;
-            }
-            else
-            {
-                eat_or_think('T');
-            }
+            think();
+            get_forks();
+            release_forks();
         }
     }
 };
@@ -92,7 +146,7 @@ int main()
 {
     initscr();
     echo();
-    cbreak();
+    nocbreak();
 
     start_color();
     init_pair(1, COLOR_BLUE, COLOR_BLACK);
@@ -120,6 +174,7 @@ int main()
 
     std::vector<Philosopher> philosophers;
     std::vector<Fork> forks(num_of_phils);
+    std::vector<std::condition_variable> cvs(num_of_phils);
 
     for (int i = 0; i < num_of_phils; i++)
     {
@@ -134,14 +189,14 @@ int main()
     for (int i = 0; i < num_of_phils; i++)
     {
         forks[i].fork_window = fork_windows[i];
-        philosophers.emplace_back(Philosopher(i, i, (i + 1) % num_of_phils, phil_windows[i]));
+        philosophers.emplace_back(Philosopher(i, i, (i + 1) % num_of_phils, phil_windows[i], forks, cvs));
     }
 
     std::vector<std::thread> threadList;
 
     for (int i = 0; i < num_of_phils; i++)
     {
-        threadList.emplace_back(std::thread(&Philosopher::feast, &philosophers[i], std::ref(forks)));
+        threadList.emplace_back(std::thread(&Philosopher::feast, &philosophers[i]));
     }
 
     while (true)
@@ -149,7 +204,6 @@ int main()
         if (wgetch(inputwin) == 'q')
         {
             cancellation_token = true;
-            mvwprintw(inputwin, 2, 5, "lolz");
             break;
         }
     }
