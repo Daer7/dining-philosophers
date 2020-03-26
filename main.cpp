@@ -143,6 +143,8 @@ struct Philosopher
     void eat()
     {
         {
+            werase(this->state_window);
+            draw_border(this->state_window, 'P');
             std::lock_guard<std::mutex> writing_lock(writing_mutex);
             wattron(this->phil_window, COLOR_PAIR(EAT_COL));
             mvwprintw(this->phil_window, 1, 9, "EATING  ");
@@ -167,6 +169,8 @@ struct Philosopher
     void think()
     {
         {
+            werase(this->state_window);
+            draw_border(this->state_window, 'P');
             std::lock_guard<std::mutex> writing_lock(writing_mutex);
             wattron(this->phil_window, COLOR_PAIR(THINK_COL));
             mvwprintw(this->phil_window, 1, 9, "THINKING");
