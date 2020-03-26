@@ -67,6 +67,7 @@ struct Philosopher
     WINDOW *resource_window;
     std::vector<Fork> &forks;
 
+    //try to acquire both forks
     void get_forks()
     {
         std::unique_lock<std::mutex> lock_left_fork(forks[left_fork_idx].m);
@@ -85,6 +86,7 @@ struct Philosopher
         fork_grabbed_info(right_fork_idx, 'R');
     }
 
+    //release forks when done eating
     void release_forks()
     {
         std::unique_lock<std::mutex> lock_left_fork(forks[left_fork_idx].m);
@@ -97,6 +99,7 @@ struct Philosopher
         forks[right_fork_idx].cv.notify_all();
     }
 
+    //display info about grabbed fork
     void fork_grabbed_info(int fork_idx, char c)
     {
         int where_to_print = 14;
@@ -116,6 +119,7 @@ struct Philosopher
         }
     }
 
+    //display info about released fork
     void fork_released_info(int fork_idx, char c)
     {
         int where_to_print = 14;
@@ -135,6 +139,7 @@ struct Philosopher
         }
     }
 
+    //eat with two forks
     void eat()
     {
         {
@@ -158,6 +163,7 @@ struct Philosopher
         wattroff(this->state_window, COLOR_PAIR(EAT_COL));
     }
 
+    //think when not eating
     void think()
     {
         {
@@ -180,6 +186,8 @@ struct Philosopher
         }
         wattroff(this->state_window, COLOR_PAIR(THINK_COL));
     }
+
+    //thread lifetime
     void feast()
     {
         while (!cancellation_token)
@@ -234,6 +242,7 @@ int main()
     std::vector<Philosopher> philosophers;
     std::vector<Fork> forks(num_of_phils);
 
+    //boxes initialization
     for (int i = 0; i < num_of_phils; i++)
     {
         phil_windows.emplace_back(newwin(y_single_window, x_single_window, (i + 1) * y_single_window, 5));
