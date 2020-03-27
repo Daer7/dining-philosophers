@@ -92,11 +92,11 @@ struct Philosopher
         std::unique_lock<std::mutex> lock_left_fork(forks[left_fork_idx].m);
         forks[left_fork_idx].in_use = false;
         fork_released_info(left_fork_idx, 'L');
-        forks[left_fork_idx].cv.notify_all();
+        forks[left_fork_idx].cv.notify_one();
         std::unique_lock<std::mutex> lock_right_fork(forks[right_fork_idx].m);
         forks[right_fork_idx].in_use = false;
         fork_released_info(right_fork_idx, 'R');
-        forks[right_fork_idx].cv.notify_all();
+        forks[right_fork_idx].cv.notify_one();
     }
 
     //display info about grabbed fork
@@ -110,11 +110,11 @@ struct Philosopher
         }
         if (c == 'R')
         {
-            where_to_print = 16;
+            where_to_print = 17;
         }
         {
             std::lock_guard<std::mutex> writing_lock(writing_mutex);
-            mvwprintw(this->resource_window, 1, where_to_print, "%d", fork_idx);
+            mvwprintw(this->resource_window, 1, where_to_print, "%2d", fork_idx);
             wrefresh(this->resource_window);
         }
     }
@@ -130,11 +130,11 @@ struct Philosopher
         }
         if (c == 'R')
         {
-            where_to_print = 16;
+            where_to_print = 17;
         }
         {
             std::lock_guard<std::mutex> writing_lock(writing_mutex);
-            mvwprintw(this->resource_window, 1, where_to_print, "X");
+            mvwprintw(this->resource_window, 1, where_to_print, "XX");
             wrefresh(this->resource_window);
         }
     }
